@@ -29,3 +29,24 @@ class StateModel:
         self.position = 0.0  # Posición del carro/base, en milímetros (mm)
 
         self.linear_velocity = 0.0  # Velocidad lineal del carro/base, en milímetros/segundo (mm/s)
+    def clear(self):
+        self.angle = None
+        self.angular_velocity = None
+        self.position = None
+        self.linear_velocity = None
+
+    def update_from_telemetry(self, message):
+        import math
+        mapping = {
+            "angle": "angle_deg",
+            "angular_velocity": "angular_velocity_deg_s",
+            "position": "position_mm",
+            "linear_velocity": "linear_velocity_mm_s",
+        }
+        for attr, key in mapping.items():
+            value = message.get(key)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                setattr(self, attr, None)
+                continue
+            value = float(value)
+            setattr(self, attr, value if math.isfinite(value) else None)

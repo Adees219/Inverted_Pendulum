@@ -20,7 +20,7 @@ class PIDPlots(QWidget):
 
     Agrupa dos instancias de LivePlot en una cuadrícula vertical:
         - Ángulo del péndulo (grados).
-        - Esfuerzo de control (PWM).
+        - Esfuerzo de control (steps/s).
     """
 
     def __init__(self):
@@ -43,7 +43,7 @@ class PIDPlots(QWidget):
 
         self.control_plot = LivePlot(
             "Esfuerzo de Control",
-            "PWM"
+            "steps/s"
         )
 
         layout.addWidget(
@@ -72,7 +72,7 @@ class PIDPlots(QWidget):
 
         Args:
             angle (float): Ángulo actual del péndulo, en grados.
-            control_effort (float): Esfuerzo de control actual (señal PWM).
+            control_effort (float): Esfuerzo de control actual (velocidad de control en steps/s).
         """
         self.angle_plot.update(
             angle

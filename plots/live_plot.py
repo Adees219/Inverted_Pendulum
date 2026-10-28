@@ -14,7 +14,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout
 )
 
-import pyqtgraph as pg  # Librería de graficación en tiempo real, optimizada para actualizaciones rápidas
+import pyqtgraph as pg
+import math  # Librería de graficación en tiempo real, optimizada para actualizaciones rápidas
 
 from ui.constants.ui_constants import (
     PLOT_BUFFER_SIZE,   # Cantidad máxima de muestras que se mantienen visibles en el gráfico
@@ -107,9 +108,14 @@ class LivePlot(QWidget):
             value (float): Nueva muestra a graficar (se añade al final del buffer;
                 si el buffer está lleno, se descarta automáticamente la muestra más antigua).
         """
-        self.buffer.append(
-            value
-        )
+        # NaN crea una discontinuidad en la curva sin inventar un cero.
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            value = math.nan
+        else:
+            value = float(value)
+            if not math.isfinite(value):
+                value = math.nan
+        self.buffer.append(value)
 
         self.curve.setData(
             list(self.buffer)  # pyqtgraph requiere una lista/array, por eso se convierte el deque antes de graficar

@@ -39,6 +39,7 @@ class ConnectionManager(QObject):
 
     connection_changed = Signal(bool)  # Señal emitida cuando cambia el estado de conexión (True = conectado)
     data_received = Signal(dict)       # Señal emitida cada vez que llegan nuevos datos del microcontrolador
+    connecting_changed = Signal(bool)  # Señal emitida al iniciar (True) o finalizar (False) un intento de conexión TCP
 
     # Constantes que identifican el modo de conexión
     SERIAL = "serial"
@@ -71,6 +72,16 @@ class ConnectionManager(QObject):
 
         self.tcp_manager.connection_changed.connect(
             self.connection_changed.emit
+        )
+        
+        # Se reenvía el estado "conectando" del gestor TCP hacia la señal pública. Se usa un método
+        # intermedio (forward_connecting_status) en lugar de conectar directamente a .emit, lo que
+        # permite depurar cada evento. Alternativa directa, sin depuración:
+        # self.tcp_manager.connecting_changed.connect(
+        #     self.connecting_changed.emit
+        # )
+        self.tcp_manager.connecting_changed.connect(
+            self.forward_connecting_status
         )
 
         self.current_mode = self.SERIAL  # Modo de conexión predeterminado al iniciar la aplicación
@@ -132,12 +143,14 @@ class ConnectionManager(QObject):
         """
         if self.current_mode == self.SERIAL:
 
-            self.serial_manager.disconnect_port()
-
             if self.serial_thread.isRunning():
 
                 self.serial_thread.stop()
 
+
+            self.serial_manager.disconnect_port()
+
+  
         else:
 
             self.tcp_manager.disconnect_network()
@@ -216,3 +229,21 @@ class ConnectionManager(QObject):
         else:
 
             self.tcp_manager.read_once()
+
+   
+    def forward_connecting_status(self, connecting):
+        """
+        Reenvía hacia la señal pública connecting_changed el estado de
+        "conectando" emitido por el gestor TCP, para que la interfaz pueda
+        mostrar el progreso del intento de conexión.
+
+        Args:
+            connecting (bool): True si inicia un intento de conexión, False si finaliza.
+        """
+        # print(
+        #     f"ConnectionManager recibió: {connecting}"  # Depuración
+        # )
+
+        self.connecting_changed.emit(
+            connecting
+        )

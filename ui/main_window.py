@@ -14,6 +14,9 @@ from PySide6.QtWidgets import (
     QVBoxLayout   # Organiza los widgets hijos en una columna vertical
 )
 
+from PySide6.QtWidgets import QMessageBox
+import json
+import math
 from PySide6.QtGui import QIcon  # Permite cargar y asignar el ícono de la ventana
 
 # Pestañas (vistas) de la interfaz, una clase por cada modo de control
@@ -62,6 +65,9 @@ class MainWindow(QMainWindow):
         # Conecta la señal de datos recibidos al método que procesa la información entrante
         self.connection_manager.data_received.connect(
             self.process_received_data
+        )
+        self.connection_manager.connection_changed.connect(
+            self.on_connection_changed
         )
 
         # =========================================================================================================================
@@ -135,24 +141,45 @@ class MainWindow(QMainWindow):
             "Control por Retroalimentación de Estado"
         )
 
+    def on_connection_changed(self, connected):
+        """Solicita telemetria por el transporte activo; nunca inicia el motor."""
+        if connected:
+            self.connection_manager.send(json.dumps({
+                "type": "command", "command": "telemetry", "enabled": True
+            }, separators=(",", ":")))
+        else:
+            self.pid_tab.apply_control_status("ready", "none")
+            self.state_tab.apply_control_status("ready", "none")
+            self.state_model.clear()
+            self.state_tab.update_ui()
+
     def process_received_data(self, data):
-        """
-        Procesa los datos entrantes provenientes del hardware.
+        if not isinstance(data, dict):
+            return
+        kind = data.get("type")
+        if kind == "telemetry":
+            self.state_model.update_from_telemetry(data)
+            self.state_tab.refresh()
+            self.pid_tab.pid_plots.update_plots(
+                self.state_model.angle,
+                self._number_or_none(data.get("control_effort_steps_s"))
+            )
+        elif kind == "status" and "state" in data:
+            self.pid_tab.apply_control_status(
+                data.get("state", "ready"), data.get("control_mode", "none")
+            )
+            self.state_tab.apply_control_status(
+                data.get("state", "ready"), data.get("control_mode", "none")
+            )
+        elif kind == "error":
+            QMessageBox.warning(self, "Respuesta del ESP32",
+                                f"{data.get('code', 'ERROR')}: {data.get('message', '')}")
+        elif kind == "ack":
+            print("[ACK]", data.get("for"), data.get("command", ""))
 
-        Actualiza el modelo de estado (StateModel) con los valores recibidos
-        y refresca la pestaña de control de estado para reflejar los cambios
-        en la interfaz.
-
-        Args:
-            data (dict): Diccionario con las lecturas del sistema. Se espera
-                que contenga las claves "d1", "d2", "d3" y "d4", correspondientes
-                a ángulo, velocidad angular, posición y velocidad lineal.
-        """
-        print(data)  # Depuración: muestra en consola los datos recibidos
-
-        #self.state_model.angle = data["d1"]             # Ángulo del péndulo
-        #self.state_model.angular_velocity = data["d2"]   # Velocidad angular del péndulo
-        #self.state_model.position = data["d3"]           # Posición del carro/base
-        #self.state_model.linear_velocity = data["d4"]     # Velocidad lineal del carro/base
-
-        self.state_tab.refresh()  # Actualiza la vista de la pestaña de estado con los nuevos valores
+    @staticmethod
+    def _number_or_none(value):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        number = float(value)
+        return number if math.isfinite(number) else None

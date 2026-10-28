@@ -42,6 +42,7 @@ from PySide6.QtCore import (
     QTimer
 )
 import math
+import json
 
 
 class StateTab(QWidget):
@@ -345,9 +346,9 @@ class StateTab(QWidget):
             controller_layout
         )
 
-        # NOTA: al igual que en PIDTab, self.update_button, self.control_button y
-        # self.reset_button se crean pero no tienen clicked.connect asignado aún —
-        # actualmente no ejecutan ninguna acción al presionarlos.
+        self.update_button.clicked.connect(self.save_state_config)
+        self.control_button.clicked.connect(self.toggle_state_control)
+        self.reset_button.clicked.connect(self.reset_state_control)
 
         # =========================================================================================================================
         #                                                      Estilo de los widgets
@@ -423,19 +424,19 @@ class StateTab(QWidget):
         actuales almacenados en self.state.
         """
         self.angle_label.setText(
-            f"{self.state.angle:.2f} °"
+            f"{self.state.angle:.2f} °" if self.state.angle is not None else "N/D"
         )
 
         self.angular_velocity_label.setText(
-            f"{self.state.angular_velocity:.2f} °/s"
+            f"{self.state.angular_velocity:.2f} °/s" if self.state.angular_velocity is not None else "N/D"
         )
 
         self.position_label.setText(
-            f"{self.state.position:.2f} mm"
+            f"{self.state.position:.2f} mm" if self.state.position is not None else "N/D"
         )
 
         self.linear_velocity_label.setText(
-            f"{self.state.linear_velocity:.2f} mm/s"
+            f"{self.state.linear_velocity:.2f} mm/s" if self.state.linear_velocity is not None else "N/D"
         )
 
     # NOTA: método de simulación deshabilitado. Se usaba para generar datos de
@@ -479,3 +480,41 @@ class StateTab(QWidget):
         self.state_plots.update_plots(
             self.state
         )
+    def save_state_config(self):
+        if not self.connection_manager.connected:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Sin conexion", "Conecta el ESP32 primero.")
+            return
+        try:
+            values = [float(w.text()) for w in (self.k1, self.k2, self.k3, self.k4)]
+            reference = float(self.reference.text())
+            if not all(math.isfinite(v) for v in values + [reference]):
+                raise ValueError("Valores no finitos")
+        except ValueError:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Parametros invalidos", "Revisa K1-K4 y la referencia en mm.")
+            return
+        payload = {"type":"state_config", "k1":values[0], "k2":values[1],
+                   "k3":values[2], "k4":values[3], "reference_mm":reference}
+        self.connection_manager.send(json.dumps(payload, separators=(",", ":")))
+
+    def toggle_state_control(self):
+        if not self.connection_manager.connected:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Sin conexion", "Conecta el ESP32 primero.")
+            return
+        command = "stop" if self.control_button.text() == "Desactivar" else "start_state"
+        self.connection_manager.send(json.dumps({"type":"command", "command":command}))
+
+    def reset_state_control(self):
+        if not self.connection_manager.connected:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Sin conexion", "Conecta el ESP32 primero.")
+            return
+        self.connection_manager.send(json.dumps({"type":"command", "command":"reset"}))
+
+    def apply_control_status(self, state, control_mode):
+        active = state == "running" and control_mode == "state"
+        self.control_button.setText("Desactivar" if active else "Activar Control")
+        set_status(self.control_status, STATUS_ACTIVE if active else STATUS_INACTIVE,
+                   STATUS_GREEN if active else STATUS_RED)

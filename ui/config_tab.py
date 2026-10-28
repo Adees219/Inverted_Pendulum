@@ -27,6 +27,11 @@ from PySide6.QtWidgets import (  # Widgets de Qt utilizados para construir la in
 
 from ui.utils.widget_style import *  # Funciones auxiliares de estilo (dimensiones, colores, fuentes de los widgets)
 
+from comunicacion.network_config import (  # Parámetros de la red TCP/IP compartidos por la aplicación
+    NETWORK_BASE,     # Prefijo de la dirección IP de la red (p. ej. "192.168.12.")
+    build_device_ip   # Función que arma y valida la IP completa a partir del número de equipo
+)
+
 from ui.constants.ui_constants import (  # Colores estándar para indicar el estado de conexión
     STATUS_GREEN,
     STATUS_RED,
@@ -38,6 +43,7 @@ from PySide6.QtGui import (  # Validadores para restringir el texto ingresado en
     QDoubleValidator
 )
 
+from PySide6.QtNetwork import QAbstractSocket  # Permite consultar el estado del socket TCP (p. ej. ConnectingState)
 from models.config_model import ConfigModel  # Modelo que almacena y serializa los parámetros de configuración
 
 
@@ -70,6 +76,16 @@ class ConfigTab(QWidget):
         # Si ocurre un error en la conexión serial, se muestra un mensaje al usuario
         self.connection_manager.serial_manager.connection_error.connect(
             self.show_connection_error
+        )
+
+        # Lo mismo para los errores de la conexión TCP (host inaccesible, timeout, mensajes inválidos, etc.)
+        self.connection_manager.tcp_manager.connection_error.connect(
+            self.show_connection_error
+        )
+
+        # Mientras se intenta conectar por TCP, se actualiza la interfaz (estado "Conectando...", botón "Cancelar")
+        self.connection_manager.connecting_changed.connect(
+            self.update_connecting_status
         )
 
         self.config = ConfigModel()  # Modelo que almacena los valores de configuración a enviar
@@ -138,7 +154,7 @@ class ConfigTab(QWidget):
         TCP_layout = QFormLayout()
 
         self.TCP_label = QLabel(
-            "192.168.12.XX"  # Muestra el formato esperado de la IP (referencia visual, no editable)
+            f"{NETWORK_BASE}XX"  # Muestra el formato esperado de la IP (referencia visual, no editable)
         )
 
         self.TCP_Equipo = QLineEdit()  # Campo donde el usuario ingresa el número de equipo (últimos octetos de la IP)
@@ -256,6 +272,8 @@ class ConfigTab(QWidget):
         self.amperaje.setText(
             "800"  # mA (motor 17HD40005H-22B soporta hasta 1.6 A máx.)
         )
+        
+        self.TCP_Equipo.setText("01")  # Número de equipo predeterminado (último octeto de la IP)
 
         self.velocidad_maxima.setText(
             "32000"  # steps/s (rango máximo permitido: ±32000)
@@ -283,6 +301,10 @@ class ConfigTab(QWidget):
                 300,
                 1600
             )
+        )
+
+        self.TCP_Equipo.setValidator(  # El último octeto de una IP de host válida va de 1 a 254 (0 = red, 255 = broadcast)
+            QIntValidator(1, 254)
         )
 
         self.velocidad_maxima.setValidator(
@@ -482,10 +504,22 @@ class ConfigTab(QWidget):
         """
         Conecta o desconecta el sistema según el estado actual de la conexión.
 
-        Si no hay conexión activa, arma el "target" (puerto serial o IP) según
-        el modo seleccionado y solicita al connection_manager que se conecte.
-        Si ya existe una conexión, la termina.
+        Si hay un intento de conexión TCP en curso, lo cancela. Si no hay
+        conexión activa, arma el "target" (puerto serial o IP) según el modo
+        seleccionado y solicita al connection_manager que se conecte. Si ya
+        existe una conexión, la termina.
         """
+        # Caso especial: si se está intentando conectar por red, el botón actúa como "Cancelar"
+        if (
+            self.connection_manager.current_mode
+            == self.connection_manager.NETWORK
+            and
+            self.connection_manager.tcp_manager.socket.state()
+            == QAbstractSocket.ConnectingState
+        ):
+            self.connection_manager.disconnect()
+            return
+
         if not self.connection_manager.connected:  # Si actualmente no está conectado
 
             if self.serial_radio.isChecked():
@@ -499,18 +533,30 @@ class ConfigTab(QWidget):
                 )
 
             else:
+          
 
                 self.connection_manager.set_mode(  # Indica al gestor que use modo Red
                     self.connection_manager.NETWORK
                 )
 
-                equipo = (
-                    self.TCP_Equipo.text()  # Número de equipo ingresado por el usuario
-                )
+                try:
+                    device_number = int(
+                        self.TCP_Equipo.text()  # Número de equipo ingresado por el usuario
+                    )
 
-                target = (
-                    f"192.168.12.{equipo}"  # Se arma la dirección IP completa
-                )
+                    target = build_device_ip(  # Arma la IP completa; lanza ValueError si el número es inválido
+                        device_number
+                    )
+
+                except ValueError as error:  # Número de equipo vacío o fuera de rango: se avisa y se cancela la conexión
+
+                    QMessageBox.warning(
+                        self,
+                        "Número de equipo inválido",
+                        str(error)
+                    )
+
+                    return
 
             self.connection_manager.connect(  # El connection_manager decide el método según el modo y realiza la conexión
                 target
@@ -519,6 +565,7 @@ class ConfigTab(QWidget):
         else:
 
             self.connection_manager.disconnect()  # Si ya está conectado, se desconecta
+
 
     def refresh_ports(self):
         """Vuelve a escanear y actualizar la lista de puertos COM disponibles."""
@@ -541,6 +588,8 @@ class ConfigTab(QWidget):
         Args:
             connected (bool): True si el sistema está conectado, False si no.
         """
+        
+
         if connected:
 
             set_status(self.connection_status, "● Conectado", STATUS_GREEN)
@@ -649,3 +698,56 @@ class ConfigTab(QWidget):
         print(
             self.config.to_json()  # Depuración: muestra en consola el JSON enviado
         )
+
+
+    def update_connecting_status(self, connecting):
+        """
+        Actualiza la interfaz mientras se realiza (o cancela) un intento de
+        conexión TCP.
+
+        Mientras se conecta, bloquea el cambio de modo, muestra el estado
+        "Conectando..." en amarillo y convierte el botón TCP en "Cancelar".
+        Si el intento termina sin lograr conexión, restablece los controles
+        al estado de desconectado.
+
+        Args:
+            connecting (bool): True si hay un intento de conexión en curso,
+                False si terminó (con o sin éxito).
+        """
+        # print(
+        #     f"TCP connecting_changed: {connecting}"  # Depuración
+        # )
+
+        # Se bloquea el cambio de modo (Serial/Red) mientras dura el intento de conexión
+        self.serial_radio.setEnabled(
+            not connecting
+        )
+
+        self.network_radio.setEnabled(
+            not connecting
+        )
+
+        if connecting:
+
+            set_status(
+                self.connection_status,
+                "● Conectando...",
+                STATUS_YELLOW
+            )
+
+            self.TCP_boton.setText("Cancelar")  # Permite abortar el intento antes de que expire el timeout
+
+            self.TCP_Equipo.setEnabled(False)
+
+        elif not self.connection_manager.connected:  # El intento terminó sin conexión (fallo, timeout o cancelación)
+
+            set_status(
+                self.connection_status,
+                "● Desconectado",
+                STATUS_RED
+            )
+
+            self.TCP_boton.setText("Conectar")
+
+            self.TCP_Equipo.setEnabled(True)
+        

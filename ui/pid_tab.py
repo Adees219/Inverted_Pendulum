@@ -43,6 +43,7 @@ from models.pid_model import PIDModel  # Modelo que almacena y serializa las gan
 from plots.pid_plots import PIDPlots  # Widget de gráficas para visualizar ángulo y señal de control en tiempo real
 
 from PySide6.QtCore import QTimer  # Temporizador usado para simular/actualizar las gráficas periódicamente
+import json
 import math  # Funciones matemáticas (usadas aquí para generar la señal simulada)
 
 
@@ -81,7 +82,8 @@ class PIDTab(QWidget):
             self.simulate_pid
         )
 
-        self.timer.start(50)  # Se ejecuta cada 50 ms (~20 actualizaciones por segundo)
+        # Simulacion pausada: los datos reales llegaran mediante telemetria.
+        # self.timer.start(50)
 
     def setup_ui(self):
         """
@@ -285,8 +287,8 @@ class PIDTab(QWidget):
             self.save_pid
         )
 
-        # NOTA: self.control_button y self.reset_button se crean pero no tienen una
-        # conexión (clicked.connect) asignada todavía — actualmente no ejecutan ninguna acción.
+        self.control_button.clicked.connect(self.toggle_pid)
+        self.reset_button.clicked.connect(self.reset_pid)
 
         actions_layout.addWidget(
             self.apply_button
@@ -432,9 +434,9 @@ class PIDTab(QWidget):
         # Envío del modelo PID al microcontrolador
         print(self.pid.to_json())  # Depuración: muestra en consola el JSON enviado
 
-        self.connection_manager.send_model(
-            self.pid
-        )
+        payload = {"type": "pid_config", "equilibrium": self.pid.mode,
+                   "kp": self.pid.kp, "ki": self.pid.ki, "kd": self.pid.kd}
+        self.connection_manager.send(json.dumps(payload, separators=(",", ":")))
 
     def simulate_pid(self):
         """
@@ -460,3 +462,21 @@ class PIDTab(QWidget):
             angle,
             control
         )
+    def toggle_pid(self):
+        if not self.connection_manager.connected:
+            QMessageBox.warning(self, "Sin conexion", "Conecta el ESP32 primero.")
+            return
+        command = "stop" if self.control_button.text() == "Desactivar" else "start_pid"
+        self.connection_manager.send(json.dumps({"type":"command", "command":command}))
+
+    def reset_pid(self):
+        if not self.connection_manager.connected:
+            QMessageBox.warning(self, "Sin conexion", "Conecta el ESP32 primero.")
+            return
+        self.connection_manager.send(json.dumps({"type":"command", "command":"reset"}))
+
+    def apply_control_status(self, state, control_mode):
+        active = state == "running" and control_mode == "pid"
+        self.control_button.setText("Desactivar" if active else "Activar")
+        set_status(self.control_status, STATUS_ACTIVE if active else STATUS_INACTIVE,
+                   STATUS_GREEN if active else STATUS_RED)
