@@ -17,6 +17,9 @@ from PySide6.QtWidgets import (
 from PySide6.QtWidgets import QMessageBox
 import json
 import math
+from PySide6.QtGui import QShortcut, QKeySequence
+from ui.diagnostic_config import ENABLE_DIAGNOSTIC_CONSOLE, DIAGNOSTIC_SHORTCUT
+from ui.diagnostic_console import DiagnosticConsole
 from PySide6.QtGui import QIcon  # Permite cargar y asignar el ícono de la ventana
 
 # Pestañas (vistas) de la interfaz, una clase por cada modo de control
@@ -141,6 +144,23 @@ class MainWindow(QMainWindow):
             "Control por Retroalimentación de Estado"
         )
 
+        self.diagnostic_console = None
+        if ENABLE_DIAGNOSTIC_CONSOLE:
+            self.diagnostic_shortcut = QShortcut(QKeySequence(DIAGNOSTIC_SHORTCUT), self)
+            self.diagnostic_shortcut.activated.connect(self.toggle_diagnostic_console)
+
+    def toggle_diagnostic_console(self):
+        if not ENABLE_DIAGNOSTIC_CONSOLE:
+            return
+        if self.diagnostic_console is None:
+            self.diagnostic_console = DiagnosticConsole(self.connection_manager, self)
+        if self.diagnostic_console.isVisible():
+            self.diagnostic_console.hide()
+        else:
+            self.diagnostic_console.show()
+            self.diagnostic_console.raise_()
+            self.diagnostic_console.activateWindow()
+
     def on_connection_changed(self, connected):
         """Solicita telemetria por el transporte activo; nunca inicia el motor."""
         if connected:
@@ -156,6 +176,8 @@ class MainWindow(QMainWindow):
     def process_received_data(self, data):
         if not isinstance(data, dict):
             return
+        if self.diagnostic_console is not None:
+            self.diagnostic_console.receive(data)
         kind = data.get("type")
         if kind == "telemetry":
             self.state_model.update_from_telemetry(data)
