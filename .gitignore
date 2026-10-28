@@ -1,1 +1,8 @@
+#Software/GUI
 GUI_Lab/
+__pycache__/
+*.pyc
+
+#Firmware/ESP32
+# Arduino: librerías de terceros
+Firmware/Esp32/libraries/

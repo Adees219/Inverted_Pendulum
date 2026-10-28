@@ -1,0 +1,10 @@
+MOD-5: PROTOCOL (Serial JSON)
+
+1. Copiar TODOS los archivos a una carpeta llamada ESP32_InvertedPendulum_MOD5.
+2. Abrir ESP32_InvertedPendulum_MOD5.ino desde Arduino IDE.
+3. Compilar, cargar y comprobar sensor_status, encoder_raw, driver_status,
+   test_limits y system_config. Con el motor desacoplado, test_move.
+4. El parser y las respuestas Serial estan en Protocol.cpp.
+5. El dispatcher y los handlers siguen en el .ino; esto es intencional.
+6. NO hay Wi-Fi/TCP todavia: sera el sprint siguiente.
+7. No se ha probado compilacion Arduino real en este entorno.
